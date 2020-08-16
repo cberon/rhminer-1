@@ -22,7 +22,7 @@
  */
 
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "MinersLib/Miner.h"
 #include "corelib/PascalWork.h"
 #include "MinersLib/CLMinerBase.h"

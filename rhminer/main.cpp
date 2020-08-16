@@ -22,8 +22,11 @@
 #include "MinersLib/GenericMinerClient.h"
 #include <atomic>
 
+
 #ifndef RH_COMPILE_CPU_ONLY
 #include "cuda_runtime.h"
+#else
+#include "corelib/miniweb.h"
 #endif
 
 RHMINER_COMMAND_LINE_DECLARE_GLOBAL_INT("v", g_logVerbosity, "General", "Log verbosity. From 0 to 3.\n0 no log, 1 normal log, 2 include warnings. 3 network and silent logs.\nDefault is 1",0, 3);
@@ -38,13 +41,13 @@ void DisplayHelp(CmdLineManager& cmdline)
 
 using namespace std;
 using namespace boost::algorithm;
+void HandleExit();
 
 #ifdef _WIN32_WINNT
-void HandleExit();
 BOOL WINAPI ConsoleHandler(DWORD signal);
 long   __stdcall   GlobalExpCallback(_EXCEPTION_POINTERS*   excp);
 #endif
-
+ 
 bool g_appActive = true;
  
 #ifdef RH_SCREEN_SAVER_MODE
@@ -53,7 +56,6 @@ int main_init(int argc, char** argv)
 int main(int argc, char** argv)
 #endif
 {
-
     ////////////////////////////////////////////////////////////////////
     //
     //      App header
@@ -63,11 +65,11 @@ int main(int argc, char** argv)
     printf("  Build %s (CUDA SDK %d.%d) %s %s\n\n", RH_BUILD_TYPE, CUDART_VERSION/1000, (CUDART_VERSION % 1000)/10, __DATE__, __TIME__);
 #else
     printf("\n  rhminer v%s beta for CPU by polyminer1 (https://github.com/polyminer1/rhminer)\n", RH_PROJECT_VERSION);
-    printf("  Build %s %s %s \n\n", RH_BUILD_TYPE, __DATE__, __TIME__);
+    printf("  Build %s %s %s %s \n\n", RH_OS_NAME, RH_BUILD_TYPE, __DATE__, __TIME__);
 #endif    
 
-	printf("  Donations : Pascal account 529692-23 \n");
-    printf("  Donations : Bitcoin address 19GfXGpRJfwcHPx2Nf8wHgMps8Eat1o4Jp \n\n");
+
+	printf("  Donations : Pascal account 529692-23 \n\n");
 
 #ifdef _WIN32_WINNT
     std::atexit(HandleExit);
@@ -95,7 +97,7 @@ int main(int argc, char** argv)
 	setenv("GPU_SINGLE_ALLOC_PERCENT", "100");
     rand32_reseed((U32)(TimeGetMilliSec())^0xF5E8A1C4);
 
-    //Preparse log file and config filename name cuz we need it prior init
+	//Preparse log file and config filename name cuz we need it prior init
     for (int i = 0; i < argc; i++)
     {
         if (stristr(argv[i], "logfilename") && i + 1 < argc)
@@ -106,6 +108,11 @@ int main(int argc, char** argv)
         if (strcmp(argv[i], "-v") == 0 && i + 1 < argc)
         {
             g_logVerbosity = ToUInt(argv[i + 1]);
+        }
+
+        if (strcmp(argv[i], "-devfee") == 0 && i + 1 < argc)
+        {
+            g_devfee = ToUInt(argv[i + 1]);
         }
 
         if (stristr(argv[i], "configfile") && i + 1 < argc)
@@ -140,6 +147,8 @@ int main(int argc, char** argv)
     if (displayHelp)
         DisplayHelp(CmdLineManager::GlobalOptions()); //exit app
 
+    PrintOutSilent("Build %s %s %s %s \n", RH_OS_NAME, RH_BUILD_TYPE, __DATE__, __TIME__);
+
     GpuManager::SetPostCommandLineOptions();
 
     //warning
@@ -148,10 +157,8 @@ int main(int argc, char** argv)
             "         Be sure to NOT start rhminer from a script in in a loop. \n"
             "         This will cause multiple instance of rhminer ro run\n\n", g_apiPort);
 
-
     KernelOffsetManager::Reset(0);
 
-    
 #ifdef _WIN32_WINNT
     PrintOut("Process priority %d\n", g_setProcessPrio);
     if (g_setProcessPrio == 0)
@@ -242,5 +249,4 @@ long  __stdcall GlobalExpCallback(_EXCEPTION_POINTERS* excp)
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
-
 #endif

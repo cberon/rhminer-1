@@ -17,9 +17,8 @@
 
 
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "MinersLib/GpuManager.h"
-#include "MinersLib/Global.h"
 #include "MinersLib/Global.h"
 #include "BuildInfo.h"
 
@@ -36,7 +35,12 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <sys/sysinfo.h>
+#if defined(MACOS_X) || (defined(__APPLE__) & defined(__MACH__))
+   #include <sys/syslimits.h>
+   #include <sys/sysctl.h>
+#else
+   #include <linux/limits.h>
+#endif
 #endif
 
 #define RHMINER_MAKE_ARCH_NAME(devname, gpuToken, archname, var) if (stristr(devname.c_str(), gpuToken)) {var = string(gpuToken) + "_" + archname;}
@@ -45,6 +49,8 @@ std::vector<GpuManager::GPUInfos>  GpuManager::Gpus;
 CPUInfo                            GpuManager::CpuInfos;
 bool                               g_isSSE3Supported = false;
 bool                               g_isSSE4Supported = false;
+bool                               g_isAVX2Supported = false;
+
 
 GpuManager::GpuManager()
 {
@@ -293,23 +299,44 @@ void GpuManager::SetPostCommandLineOptions()
     if (g_memoryBoostLevel == RH_OPT_UNSET)
     {
         g_memoryBoostLevel = CpuInfos.numberOfCores == CpuInfos.numberOfProcessors ? 0 : 1; //enable boost on hyperthreads cpu
+#if defined(MACOS_X) || (defined(__APPLE__) & defined(__MACH__))
+        if (stristr(CpuInfos.cpuBrandName.c_str(), "xeon") ||
+            stristr(CpuInfos.cpuBrandName.c_str(), "epyc"))
+            g_memoryBoostLevel = 0;
+#endif
     }
 
 #ifdef RHMINER_ENABLE_SSE4
     if (g_sseOptimization > 2)
         g_sseOptimization = 2;
 
-    #if defined(RHMINER_COND_SSE4)
+#if defined(RHMINER_COND_SSE4)
     g_sseOptimization = 0;
-    #endif
+#endif
 
 
+    if (g_sseOptimization == 2)
+    {
+#if defined(RH_ENABLE_AVX)
+        bool avxDisabled = false;
 #else
+        bool avxDisabled = true;
+#endif
+        if (avxDisabled || g_isAVX2Supported == false)
+        {
+            g_sseOptimization = 0;
+            PrintOut("WARNING. AVX not supported. Selecting default optimization level.\n");
+        }
+    }
+
+#else //#ifdef RHMINER_ENABLE_SSE4
+
     if (g_sseOptimization)
         PrintOut("SSE4 not available in this binary. -sseboost option ignored. \n");
     g_sseOptimization = 0;
     PrintOut("Detecting old-gen cpu.\n");
-#endif
+
+#endif //#ifdef RHMINER_ENABLE_SSE4
 }
 
 void GpuManager::LoadGPUMap() 
@@ -474,7 +501,7 @@ void GpuManager::LoadGPUMap()
                 inf.description = props.name;
                 inf.deviceName = props.name;
                 inf.platformName = "NVIDIA";
-                inf.archName = "asd";
+                inf.archName = "Nvidia";
                 inf.deviceVersion = FormatString("%d:%d", props.major, props.minor);
                 inf.deviceExtention = "";
                 inf.memorySize = props.totalGlobalMem;
@@ -584,6 +611,7 @@ bool GpuManager::SetupGPU()
         }
     }
 
+
     if (g_memoryBoostLevel)
         PrintOutCritical("Enabling Memory boost.\n");
 
@@ -601,9 +629,10 @@ bool GpuManager::SetupGPU()
             exit(-1);
         }
 
-        if (/*CpuInfos.avxSupportted == false && */g_sseOptimization == 2)
+        if (CpuInfos.avxSupportted == false && g_sseOptimization == 2)
         {
-            PrintOut("AVX2 not supported yet.\n");
+            //PrintOut("AVX2 not supported yet.\n");
+			PrintOut("AVX2 not supported on this platform.\n");
             exit(-1);
         }
     }
@@ -644,6 +673,13 @@ U32 GpuManager::GetAllGpuThreadsCount(U32& enabledGpuCount)
 
 
 #ifdef __GNUC__
+
+void __cpuidex(int cpuid[4], int func_id, int subfunc_id)
+{
+    asm volatile ("cpuid"
+        : "=a" (cpuid[0]), "=b" (cpuid[1]), "=c" (cpuid[2]), "=d" (cpuid[3])
+        : "0" (func_id), "2" (subfunc_id));
+}
 
 void __cpuid(int* cpuinfo, int info)
 {
@@ -743,8 +779,12 @@ void GpuManager::TestExtraInstructions()
 	if (osxsaveSupported && CpuInfos.avxSupportted)
 	{
 		// _XCR_XFEATURE_ENABLED_MASK = 0
-		unsigned long long xcrFeatureMask = _xgetbv(0);
-		CpuInfos.avxSupportted = (xcrFeatureMask & 0x6) == 0x6;
+		//unsigned long long xcrFeatureMask = _xgetbv(0); 
+		//CpuInfos.avxSupportted = (xcrFeatureMask & 0x6) == 0x6;
+
+        int info2[4];
+        __cpuidex(info2, 7, 0);
+        CpuInfos.avxSupportted = (info2[1] & (1 << 5)) != 0;
 	}
 
 	// ----------------------------------------------------------------------
@@ -761,9 +801,7 @@ void GpuManager::TestExtraInstructions()
     
     g_isSSE3Supported = CpuInfos.sse3Supportted;
     g_isSSE4Supported = CpuInfos.sse4_1Supportted;
-    PrintOutSilent("SSe3   supported : %s\n", CpuInfos.sse3Supportted ? "Yes" : "No");
-    PrintOutSilent("SSe4.1 supported : %s\n", CpuInfos.sse4_1Supportted ? "Yes" : "No");
-    PrintOutSilent("avx    supported : %s\n", CpuInfos.avxSupportted ? "Yes" : "No");	
+    g_isAVX2Supported = CpuInfos.avxSupportted;
 
 #if defined(RHMINER_ENABLE_SSE4) && !defined(RHMINER_COND_SSE4)
     if (!CpuInfos.sse4_1Supportted)
@@ -821,11 +859,27 @@ void GpuManager::LoadCPUInfos()
     CpuInfos.numberOfProcessors = sysconf(_SC_NPROCESSORS_ONLN);
     CpuInfos.numberOfCores = 0;
     CpuInfos.allocationGranularity = 1024*64;
+    #ifdef _SC_AVPHYS_PAGES
     CpuInfos.avaiablelMem =  sysconf(_SC_PAGESIZE) * sysconf(_SC_AVPHYS_PAGES);
+    #else
+        CpuInfos.avaiablelMem =  sysconf(_SC_PAGESIZE) * sysconf(_SC_PAGE_SIZE);
+    #endif
+
     CpuInfos.cpuBrandName = "x64";
 
     string line;
     string brand;
+
+#if defined(MACOS_X) || (defined(__APPLE__) & defined(__MACH__))
+    char buf[100];
+    size_t buflen = 100;
+    sysctlbyname("machdep.cpu.brand_string", &buf, &buflen, NULL, 0);
+    brand = buf;
+    memset(buf, 0, 100);
+    sysctlbyname("hw.ncpu", &buf, &buflen, NULL, 0);
+    CpuInfos.numberOfCores = (U32)*buf;
+
+#else
     ifstream finfo("/proc/cpuinfo");
     while(getline(finfo,line)) 
     {
@@ -845,7 +899,7 @@ void GpuManager::LoadCPUInfos()
             CpuInfos.numberOfCores = ToUInt(TrimString(info));
         }
     }    
-    
+#endif    
     if (!CpuInfos.numberOfCores)
     {
         CpuInfos.numberOfCores = sysconf(_SC_NPROCESSORS_ONLN);

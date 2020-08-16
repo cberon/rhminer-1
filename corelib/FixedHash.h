@@ -25,7 +25,7 @@
 
 
 #pragma once
-
+#include ".\rhminer\precomp.h"
 #include <cstdint>
 #include "CommonData.h"
 

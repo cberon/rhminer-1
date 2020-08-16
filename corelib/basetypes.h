@@ -30,6 +30,9 @@
     #error !! UNSUPPORTED COMPILER !!
 #endif
 
+#define RH_IS_ALIGNED_32(p) (0 == (3 & ((const char*)(p) - (const char*)0)))
+#define RH_IS_ALIGNED_64(p) (0 == (7 & ((const char*)(p) - (const char*)0)))
+
 #if defined(__CUDA_ARCH__)
     #define RHMINER_PLATFORM_CUDA
     #define RHMINER_PLATFORM_GPU
@@ -86,6 +89,9 @@
     #define _CM(X) X
     #define CUDA_ONLY(X)
     #define CUDA_NOT_ONLY(X) X
+
+    //For research purpose only. AVX code is actually slower on most cpu !
+    //#define RH_ENABLE_AVX
 #endif
 
 
@@ -157,7 +163,7 @@ extern void PrintOut(const char *szFormat, ...);
         if (!(x)) \
         { \
             printf("Error. Assert '%s' \n", #x); \
-            int* i = 0; *i = 0; \
+            exit(-(__LINE__)); \
         } \
     }
 #endif

@@ -14,7 +14,7 @@
 /// @copyright Polyminer1, QualiaLibre
 
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "RandomHashCLMiner.h"
 #include "MinersLib/Global.h"
 
@@ -41,7 +41,7 @@ void RandomHashCLMiner::QueueKernel()
 {
     GenericCLMiner::QueueKernel();
 }
-
+/*
 SolutionSptr RandomHashCLMiner::MakeSubmitSolution(const std::vector<U64>& nonces, bool isFromCpuMiner)
 {
     PascalSolution* sol = new PascalSolution();
@@ -53,10 +53,9 @@ SolutionSptr RandomHashCLMiner::MakeSubmitSolution(const std::vector<U64>& nonce
     return SolutionSptr(sol);
 }
 
-
+*/
 bool RandomHashCLMiner::configureGPU()
 {
-    //target a minimum of I=10
     return GpuManager::SetupGPU();
 }
 

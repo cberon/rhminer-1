@@ -1,4 +1,4 @@
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "corelib/Log.h"
 #include "corelib/Guards.h"
 #include <time.h>

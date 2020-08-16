@@ -14,7 +14,7 @@
 /// @file
 /// @copyright Polyminer1
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "Farm.h"
 #include "corelib/PascalWork.h"
 #include "MinersLib/Global.h"
@@ -216,9 +216,9 @@ WorkingProgress const& Farm::miningProgress(bool reset)
 	WorkingProgress p;
 	{
         Guard l2(m_minerWorkMutex);
-        if (!m_lastProgressTime)
+        if (m_lastProgressTime == U64_Max)
             m_lastProgressTime = TimeGetMilliSec();
-        U32 dt = TimeGetMilliSec() - m_lastProgressTime;
+        U32 dt = (U32)(TimeGetMilliSec() - m_lastProgressTime);
         if (dt < 100)
             dt = 100;
         m_lastProgressTime = TimeGetMilliSec();
@@ -261,7 +261,7 @@ WorkingProgress const& Farm::miningProgress(bool reset)
     {
         auto rate = p.minersHasheRate[i];
         if (rate > m_farmData.m_minersHasheRatePeak[i])
-            m_farmData.m_minersHasheRatePeak[i] = rate;
+            m_farmData.m_minersHasheRatePeak[i] = (float)rate;
     }
 	m_farmData.m_progress = p;
     m_farmData.m_progress.minersHasheRatePeak = m_farmData.m_minersHasheRatePeak;

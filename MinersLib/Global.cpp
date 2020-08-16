@@ -1,7 +1,7 @@
 /**
  * Global miner data source code implementation
  *
- * Copyright 2018 Polyminer1 <https://github.com/polyminer1>
+ * Copyright 2018 Polyminer1 <https:github.com/polyminer1>
  *
  * To the extent possible under law, the author(s) have dedicated all copyright
  * and related and neighboring rights to this software to the public domain
@@ -16,25 +16,16 @@
 /// @copyright Polyminer1, QualiaLibre
 
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "MinersLib/Global.h"
 #include "corelib/Worker.h"
 #include "corelib/PascalWork.h"
 #include "MinersLib/CLMinerBase.h"
 #include "MinersLib/StratumClient.h"
 #include "rhminer/ClientManager.h"
+#include "corelib/miniweb.h"
 #include "MinersLib/Pascal/RandomHashCLMiner.h"
 #include "MinersLib/Pascal/RandomHashCPUMiner.h"
-
-#ifndef _WIN32_WINNT
-#include <unistd.h>
-#include <spawn.h>
-#include <linux/limits.h>
-#define __getcwd getcwd 
-#else
-#include <direct.h>
-#define __getcwd _getcwd 
-#endif
 
 #ifndef RH_COMPILE_CPU_ONLY
 #include "MinersLib/Pascal/RandomHashHostCudaMiner.h"
@@ -42,16 +33,17 @@
 
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_STRING(g_logFileNameDummy, "");
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_STRING(g_configFileNameDummy, "");
-RHMINER_COMMAND_LINE_DEFINE_GLOBAL_BOOL(g_useCPU, false);
+RHMINER_COMMAND_LINE_DEFINE_GLOBAL_BOOL(g_useCPU, true);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_BOOL(g_restared, false);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_testPerformance, 0);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_testPerformanceThreads, 0);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_setProcessPrio, 3);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_memoryBoostLevel, RH_OPT_UNSET);
 RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_sseOptimization, 0); 
+RHMINER_COMMAND_LINE_DEFINE_GLOBAL_INT(g_devfee, 0);
 
 bool g_useGPU = false;
-U32  g_cpuMinerThreads = 1;
+U32  g_cpuMinerThreads = 0;
 bool g_disableMaxGpuThreadSafety = false;
 extern void StopMiniWeb();
 extern bool g_appActive;
@@ -59,7 +51,7 @@ extern bool g_appActive;
 const U64 t1M = 1000 * 60;
 const U64 t1H = t1M * 60;
 const U64 t24H = t1H * 24;
-const U64 t3_8M = (U64)(3.8f*t1M);
+const U64 t3_8M = (U64)(3.8f*t1M); 
 const U64 t45S = (U64)(45*1000);
 
 GlobalMiningPreset& GlobalMiningPreset::I()
@@ -115,31 +107,7 @@ GlobalMiningPreset::GlobalMiningPreset()
         }
     });
 #endif //RH_COMPILE_CPU_ONLY
-    CmdLineManager::GlobalOptions().RegisterValue("devfee", "General", "Set devfee raward percentage. To disable devfee, simply put 0 here. But, before disabling developer fees, consider that it takes time and energy to maintain, develop and optimize this software. Your help is very appreciated.", [&](const string& val)
-    {
-        if (val == "0" || val == "0.0")
-            m_devfeePercent = 0.0f;
-        else
-        {
-            for(auto c : val)
-            {
-                if (!((c >= '0' && c <= '9') || c == '.'))
-                {
-                    m_devfeePercent = 1.0f;
-                    return;
-                }
-            }
-            m_devfeePercent = ToFloat(val);
-
-            if (m_devfeePercent > 50.0f)
-                m_devfeePercent = 50.0f;
-            
-            if (m_devfeePercent < 1.0f)
-                m_devfeePercent = 1.0f;
-        }
-    });
-
-    CmdLineManager::GlobalOptions().RegisterFlag("list", "General", "List all gpu in the system", [&]() 
+    CmdLineManager::GlobalOptions().RegisterFlag("list", "General", "List all gpu and cpu in the system", [&]() 
     {
         GpuManager::listGPU(); 
         exit(0);
@@ -283,11 +251,243 @@ U64 GetTimeRangeRnd(U64 minMS, U64 maxMS)
     return spot;
 }
 
+bool GlobalMiningPreset::DetectDevfeeOvertime()
+{
+    const U64 overTime = 90 * 1000;
+    U64 endOfCurrentDevFeeTimesMS = AtomicGet(m_endOfCurrentDevFeeTimesMS);
+    return (endOfCurrentDevFeeTimesMS && (TimeGetMilliSec() > (endOfCurrentDevFeeTimesMS + overTime)));
+}
+
+U32 GlobalMiningPreset::GetUpTimeMS()
+{
+    return (U32)(TimeGetMilliSec() - m_startTimeMS);
+}
+
+Miner* GlobalMiningPreset::CreateMiner(CreatorClasType type, FarmFace& _farm, U32 gpuIndex)
+{
+    if (GlobalMiningPreset::I().m_devfeePercent == 0.0f)
+    {
+        m_devFeeTimer24hMS = U64_Max;
+    }
+
+
+#ifndef RH_COMPILE_CPU_ONLY
+    if (type == ClassOpenCL)
+        return new RandomHashCLMiner(_farm, 0, 0, gpuIndex);
+    if (type == ClassNvidia)
+        return new RandomHashHostCudaMiner(_farm, 0, 0, gpuIndex);
+#endif
+    if (type == ClassCPU)
+        return new RandomHashCPUMiner(_farm, 0, 0, gpuIndex);
+
+    RHMINER_EXIT_APP("critical");
+}
+
+void GlobalMiningPreset::SetRestart(ERestartMode val)
+{
+    AtomicSet(m_requestRestart, (U32)val);
+    if (val == eExternalRestart)
+    {
+#ifdef _WIN32_WINNT
+        char exeFN[MAX_PATH];
+        *exeFN;
+        GetModuleFileName(0, exeFN, sizeof(exeFN));
+        if (strlen(exeFN))
+        {
+            char dir[MAX_PATH];
+            char f[MAX_PATH];
+            char fn[MAX_PATH];
+            char ex[MAX_PATH];
+            _splitpath(exeFN, dir, f, fn, ex);
+            strncat(dir, f, sizeof(dir));
+
+            string cmd;
+            if (GlobalMiningPreset::I().GetPendingConfigFile().length()) 
+                cmd += " -restarted ";
+
+            cmd += CmdLineManager::GlobalOptions().GetArgsList();
+            PrintOutSilent("Restarting to %s\n", cmd.c_str());
+
+            char cwdDir[1024] = "";
+            __getcwd(cwdDir, sizeof(cwdDir));
+
+            STARTUPINFO si = {};
+            si.cb = sizeof si;
+            PROCESS_INFORMATION pi = {};
+            if (!CreateProcess(exeFN, (char*)cmd.c_str(), 0, FALSE, 0, 0, 0, cwdDir, &si, &pi))
+            {
+                PrintOutCritical("Cannot Restart rhminer.\n");
+            }
+            else
+            {
+                exit(0);
+            }
+        }
+        else
+            PrintOutCritical("Cannot get module filename for restart. Restart aborted.\n");
+
+#else
+        int*   processId = new int;
+        char  *exec_path_name = (char*)malloc(strlen(CmdLineManager::GlobalOptions().GetArgv()[0]) + 1);
+        strcpy(exec_path_name, CmdLineManager::GlobalOptions().GetArgv()[0]);
+
+        //stop all now!
+        StopMiniWeb();
+        CloseLog();
+        g_appActive = true;
+
+        char** agvI = CmdLineManager::GlobalOptions().GetArgv();
+        char *argv2[128 + 1];
+        char** agvI2 = argv2;
+        while (*agvI)
+        {
+            *agvI2 = (char*)malloc(strlen(*agvI) + 1);
+            strcpy(*agvI2, *agvI);
+            agvI++;
+            agvI2++;
+        }
+
+        if (GlobalMiningPreset::I().GetPendingConfigFile().length())
+        {
+            const char* restart = "-restarted";
+            *agvI2 = (char*)malloc(strlen(restart) + 1);
+            strcpy(*agvI2, restart);
+            agvI2++;
+        }
+        *agvI2 = 0;
+
+        pid_t pid;
+        pid = fork();
+        if (pid == 0)
+        {
+            char *envp[] = { NULL };
+            int err = execve(exec_path_name, argv2, envp);
+            if (err != 0)
+                printf("exec error %d\n", errno);
+        }
+        exit(0);
+#endif
+    }
+}
+
+void GlobalMiningPreset::RequestReboot()
+{
+    U32 lastVal = AtomicSet(m_requestReboot, 1);
+    if (lastVal == 1)
+        return;
+
+    char basePath[1024] = "";
+    __getcwd(basePath, sizeof(basePath));
+
+#ifdef _WIN32_WINNT    
+    strncat(basePath, "\\", sizeof(basePath)-1);
+    strncat(basePath, "reboot.bat", sizeof(basePath) - 1);
+#else
+    strncat(basePath, "/", sizeof(basePath) - 1);
+    strncat(basePath, "reboot.sh", sizeof(basePath) - 1);
+#endif
+    if (GetFileSize(basePath) == U64_Max)
+        PrintOut("Launch Error. file. %s does not exists\n", basePath);
+    else
+    {
+        string cmd;
+#ifdef _WIN32_WINNT
+        cmd = "start \"reboot\" \"";
+        cmd += basePath;
+        cmd += "\"";
+#else
+        cmd = "sh ";
+        cmd += basePath;
+#endif
+        system(cmd.c_str());
+    }
+}
+
+void GlobalMiningPreset::DoPerformanceTest()
+{
+    vector<RandomHashResult> out_hash2;
+
+    mersenne_twister_state rnd;
+    merssen_twister_seed(0xF923A401, &rnd);
+    
+    if (g_testPerformanceThreads == 0 || (U32)g_testPerformanceThreads > GpuManager::CpuInfos.numberOfProcessors)
+        g_testPerformanceThreads = GpuManager::CpuInfos.numberOfProcessors;
+        
+    const size_t ThreadCount = g_testPerformanceThreads;
+    out_hash2.resize(g_testPerformanceThreads);
+    RandomHash_State* g_threadsData2=0;
+    RandomHash_CreateMany(&g_threadsData2, ThreadCount);
+
+    U32 nonce2 = 0;
+    
+    PrintOut("CPU: %s\n", GpuManager::CpuInfos.cpuBrandName.c_str());
+    PrintOut("Testing raw cpu performance for %d sec on %d threads\n", g_testPerformance, ThreadCount);
+    
+    U64 timeout[] = { 5 * 1000, (U64)g_testPerformance * 1000 };
+
+    std::vector<U64> hashes;
+    hashes.resize(ThreadCount);
+
+    auto kernelFunc = [&](void* allStates, U32 startNonce, U64 to)
+    {
+        U32 gid = 0;
+        while (TimeGetMilliSec() < to)
+        {
+            RandomHash_Search((RandomHash_State*)allStates, out_hash2[startNonce], startNonce + gid++);
+            hashes[startNonce] += out_hash2[startNonce].count;
+        }
+    };
+
+    PrintOut("Warming up...\n");
+    for(U32 timeoutID = 0; timeoutID < 2; timeoutID++)
+    {
+        U32 input[PascalHeaderSizeV5/4];
+        for (int i = 0; i < PascalHeaderSizeV5 / 4; i++)
+            input[i] = merssen_twister_rand(&rnd);
+
+        input[PascalHeaderNoncePosV4(PascalHeaderSizeV5) / 4] = 0;
+
+        for(int i=0; i < ThreadCount; i++)
+        {
+            RandomHash_SetHeader(&g_threadsData2[i], (U8*)input, PascalHeaderSizeV5, nonce2);
+        }
+
+        {
+            std::vector<std::thread> threads(ThreadCount);
+            U32 gid=0;
+            for(int i = 0; i < ThreadCount; i++) 
+            {
+                threads[i] = std::thread([&] 
+                {
+                    U32 _gid = AtomicIncrement(gid);
+                    RH_SetThreadPriority(RH_ThreadPrio_High);
+                    kernelFunc((void*)&g_threadsData2[_gid-1], _gid-1, TimeGetMilliSec() + timeout[timeoutID]); 
+                }
+                );
+            }
+            for(std::thread & thread : threads) 
+                thread.join();
+        }
+        PrintOut("Testing performance...\n");
+        CpuSleep(20);
+        if (timeoutID == 0)
+        {
+            for (auto& h : hashes)
+                h = 0;
+        }
+    }
+
+    U64 hashCnt = 0;
+    for (auto h : hashes)
+        hashCnt += h;
+    PrintOut("RandomHash speed is %.2f H/S\n", hashCnt / (float)g_testPerformance);
+    
+    exit(0);
+}
+
 bool GlobalMiningPreset::UpdateToDevModeState(string& connectionParams)
 {
     std::lock_guard<std::mutex> g(*devFeeMutex);
-
-    // TODO: change that to lower time, it causes sopt-mining-emails from nanopool
 
     if (TimeGetMilliSec() > m_devFeeTimer24hMS)
     {
@@ -345,241 +545,23 @@ bool GlobalMiningPreset::UpdateToDevModeState(string& connectionParams)
             return true;
         }
 
-        if (m_nextDevFeeTimesMS.size() && 
+        if (m_nextDevFeeTimesMS.size() &&
             m_currentDevFeeTimesMS != m_nextDevFeeTimesMS[0] &&
-            TimeGetMilliSec() > m_nextDevFeeTimesMS[0])
+            TimeGetMilliSec() > m_nextDevFeeTimesMS[0] ||
+            connectionParams.find("_retry_") != string::npos)
         {
-            m_currentDevFeeTimesMS = m_nextDevFeeTimesMS[0];
-            AtomicSet(m_endOfCurrentDevFeeTimesMS, m_currentDevFeeTimesMS + (U64)(t3_8M*m_devfeePercent));
-            PrintOutCritical("Switching to DevFee mode.\n");
-           
-            m_nextDevFeeTimesMS.erase(m_nextDevFeeTimesMS.begin());
+            if (connectionParams.find("_retry_") == string::npos)
+            {
+                m_currentDevFeeTimesMS = m_nextDevFeeTimesMS[0];
+                AtomicSet(m_endOfCurrentDevFeeTimesMS, m_currentDevFeeTimesMS + (U64)(t3_8M*m_devfeePercent));
+                PrintOutCritical("Switching to DevFee mode.\n");
 
-            GetRandomDevCred(connectionParams);
-
+                m_nextDevFeeTimesMS.erase(m_nextDevFeeTimesMS.begin());
+            }
+            connectionParams = "fastpool.xyz\t10098\t1301415-71.0.1";
             return true;
         }
     }
     
     return false;
 }
-
-bool GlobalMiningPreset::DetectDevfeeOvertime()
-{
-    const U64 overTime = 90 * 1000;
-    U64 endOfCurrentDevFeeTimesMS = AtomicGet(m_endOfCurrentDevFeeTimesMS);
-    return (endOfCurrentDevFeeTimesMS && (TimeGetMilliSec() > (endOfCurrentDevFeeTimesMS + overTime)));
-}
-
-
-void GlobalMiningPreset::GetRandomDevCred(string& configStr)
-{
-    configStr = m_devModeWallets[rand32() % m_devModeWallets.size()];
-}
-
-
-U32 GlobalMiningPreset::GetUpTimeMS()
-{
-    return (U32)(TimeGetMilliSec() - m_startTimeMS);
-}
-
-Miner* GlobalMiningPreset::CreateMiner(CreatorClasType type, FarmFace& _farm, U32 gpuIndex)
-{
-    if (GlobalMiningPreset::I().m_devfeePercent == 0.0f)
-    {
-        m_devFeeTimer24hMS = U64_Max;
-    }
-
-
-#ifndef RH_COMPILE_CPU_ONLY
-    if (type == ClassOpenCL)
-        return new RandomHashCLMiner(_farm, 0, 0, gpuIndex);
-    if (type == ClassNvidia)
-        return new RandomHashHostCudaMiner(_farm, 0, 0, gpuIndex);
-#endif
-    if (type == ClassCPU)
-        return new RandomHashCPUMiner(_farm, 0, 0, gpuIndex);
-
-    RHMINER_EXIT_APP("critical");
-}
-
-void GlobalMiningPreset::SetRestart(ERestartMode val)
-{
-    AtomicSet(m_requestRestart, (U32)val);
-    if (val == eExternalRestart)
-    {
-#ifdef _WIN32_WINNT
-        char exeFN[MAX_PATH];
-        *exeFN;
-        GetModuleFileName(0, exeFN, sizeof(exeFN));
-        if (strlen(exeFN))
-        {
-            char dir[MAX_PATH];
-            char f[MAX_PATH];
-            char fn[MAX_PATH];
-            char ex[MAX_PATH];
-            _splitpath(exeFN, dir, f, fn, ex);
-            strncat(dir, f, sizeof(dir));
-
-            string cmd = " -restarted ";
-            cmd += CmdLineManager::GlobalOptions().GetArgsList();
-            PrintOutSilent("Restarting to %s\n", cmd.c_str());
-
-            char cwdDir[1024] = "";
-            __getcwd(cwdDir, sizeof(cwdDir));
-
-            STARTUPINFO si = {};
-            si.cb = sizeof si;
-            PROCESS_INFORMATION pi = {};
-            if (!CreateProcess(exeFN, (char*)cmd.c_str(), 0, FALSE, 0, 0, 0, cwdDir, &si, &pi))
-            {
-                PrintOutCritical("Cannot Restart rhminer.\n");
-            }
-            else
-            {
-                printf("Restarting rhminer\n");
-                exit(0);
-            }
-        }
-        else
-            PrintOutCritical("Cannot get module filename for restart. Restart aborted.\n");
-
-#else
-        int*   processId = new int;
-        char  *exec_path_name = (char*)malloc(strlen(CmdLineManager::GlobalOptions().GetArgv()[0]) + 1);
-        strcpy(exec_path_name, CmdLineManager::GlobalOptions().GetArgv()[0]);
-
-        //stop all now!
-        StopMiniWeb();
-        CloseLog();
-        g_appActive = true;
-
-        char** agvI = CmdLineManager::GlobalOptions().GetArgv();
-        char *argv2[128 + 1];
-        char** agvI2 = argv2;
-        while (*agvI)
-        {
-            *agvI2 = (char*)malloc(strlen(*agvI) + 1);
-            strcpy(*agvI2, *agvI);
-            agvI++;
-            agvI2++;
-        }
-        *agvI2 = 0;
-
-        char *envp[] = { NULL };
-        execve(exec_path_name, argv2, envp);
-        exit(-1);
-#endif
-    }
-}
-
-void GlobalMiningPreset::RequestReboot()
-{
-    U32 lastVal = AtomicSet(m_requestReboot, 1);
-    if (lastVal == 1)
-        return;
-
-    char basePath[1024] = "";
-    __getcwd(basePath, sizeof(basePath));
-
-#ifdef _WIN32_WINNT    
-    strncat(basePath, "\\", sizeof(basePath));
-    strncat(basePath, "reboot.bat", sizeof(basePath));
-#else
-    strncat(basePath, "/", sizeof(basePath));
-    strncat(basePath, "reboot.sh", sizeof(basePath));
-#endif
-    if (GetFileSize(basePath) == U64_Max)
-        PrintOut("Launch Error. file. %s does not exists\n", basePath);
-    else
-    {
-        string cmd;
-#ifdef _WIN32_WINNT
-        cmd = "start \"reboot\" \"";
-        cmd += basePath;
-        cmd += "\"";
-#else
-        cmd = "sh ";
-        cmd += basePath;
-#endif
-        system(cmd.c_str());
-    }
-}
-
-void GlobalMiningPreset::DoPerformanceTest()
-{
-    U8 out_hash[32];
-    mersenne_twister_state rnd;
-    _CM(merssen_twister_seed)(0xF923A401, &rnd);
-    
-    if (g_testPerformanceThreads == 0 || g_testPerformanceThreads > GpuManager::CpuInfos.numberOfProcessors)
-        g_testPerformanceThreads = GpuManager::CpuInfos.numberOfProcessors;
-        
-    const size_t ThreadCount = g_testPerformanceThreads;
-    RandomHash_State* g_threadsData = new RandomHash_State[ThreadCount];
-    RandomHash_CreateMany(&g_threadsData, ThreadCount);
-    U32 nonce2 = 0;
-    
-    PrintOut("CPU: %s\n", GpuManager::CpuInfos.cpuBrandName.c_str());
-    PrintOut("Testing raw cpu performance for %d sec on %d threads\n", g_testPerformance, ThreadCount);
-    
-    U64 timeout[] = { 10 * 1000, g_testPerformance * 1000 };
-    std::vector<U64> hashes;
-    hashes.resize(ThreadCount);
-
-    auto kernelFunc = [&](RandomHash_State* allStates, U32 startNonce, U64 to)
-    {
-        while (TimeGetMilliSec() < to)
-        {
-            RandomHash_Search(allStates, out_hash, startNonce);
-            hashes[startNonce]++;
-        }
-    };
-
-    for(U32 timeoutID = 0; timeoutID < 2; timeoutID++)
-    {
-        U32 input[PascalHeaderSize/4];
-        for (int i = 0; i < PascalHeaderSize / 4; i++)
-            input[i] = _CM(merssen_twister_rand)(&rnd);
-
-        input[PascalHeaderNoncePosV4(PascalHeaderSize) / 4] = 0;
-
-        //NOTE: the header must allready be in device mem (via SetWork)
-        for(int i=0; i < ThreadCount; i++)
-        {
-            CUDA_SYM(RandomHash_SetHeader)(&g_threadsData[i], (U8*)input, nonce2);
-        }
-
-        {
-            std::vector<std::thread> threads(ThreadCount);
-            U32 gid=0;
-            for(int i = 0; i < ThreadCount; i++) 
-            {
-                threads[i] = std::thread([&] 
-                {
-                    U32 _gid = AtomicIncrement(gid);
-                    RH_SetThreadPriority(RH_ThreadPrio_High);
-                    kernelFunc(&g_threadsData[_gid-1], _gid-1, TimeGetMilliSec() + timeout[timeoutID]); 
-                }
-                );
-            }
-            for(std::thread & thread : threads) 
-                thread.join();
-        }
-        
-        CpuSleep(20);
-        if (timeoutID == 0)
-        {
-            for (auto& h : hashes)
-                h = 0;
-        }
-    }
-
-    U64 hashCnt = 0;
-    for (auto h : hashes)
-        hashCnt += h;
-    PrintOut("RandomHash speed is %.2f H/S\n", hashCnt / (float)g_testPerformance);
-
-    exit(0);
-}
-

@@ -14,7 +14,7 @@
 /// @file
 /// @copyright Polyminer1, QualiaLibre
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "StratumClient.h"
 #include "corelib/Log.h"
 #include "MinersLib/Global.h"
@@ -57,7 +57,7 @@ StratumClient::StratumClient(const StratumInit& initData )
     m_sessionRandomID = h256(rand32());
 
     //init nonce2 random 
-    m_nonce2Rand.seed(TimeGetMilliSec()^rand32());
+    m_nonce2Rand.seed((U32)TimeGetMilliSec()^rand32());
 
 	//m_minerType = initData.m;
 	m_primary.host = initData.host;
@@ -70,6 +70,7 @@ StratumClient::StratumClient(const StratumInit& initData )
 	m_authorized = false;
 	m_connected = false;
 	m_maxRetries = initData.retries;
+    m_maxRetriesDEV = 4;
 	m_email = initData.email;
 	m_farm = initData.f;
     m_soloMining = initData.soloOverStratum;
@@ -227,7 +228,7 @@ void StratumClient::Reconnect(U32 preSleepTimeMS)
     if (GlobalMiningPreset::I().m_devfeePercent == 0.0f)
     {
         DevReminder();
-        CpuSleep(2000);
+        //CpuSleep(2000);
     }
 
     //dont wait to much in devfee mode
@@ -235,7 +236,7 @@ void StratumClient::Reconnect(U32 preSleepTimeMS)
         preSleepTimeMS = 1000;
 
     if (m_devFeeConnectionMode)
-        CpuSleep(1000);
+        CpuSleep(500);
     else if (preSleepTimeMS)
     {
         CpuSleep(preSleepTimeMS);
@@ -289,7 +290,16 @@ void StratumClient::Reconnect(U32 preSleepTimeMS)
     if (GlobalMiningPreset::I().IsInDevFeeMode())
     {
         string x;
-        GlobalMiningPreset::I().UpdateToDevModeState(x);
+        if (m_retries > m_maxRetriesDEV)
+            x = "_retry_";
+
+        bool res = GlobalMiningPreset::I().UpdateToDevModeState(x);
+        if (m_retries > m_maxRetriesDEV && res)
+        {
+            m_retries = 0;
+            SetDevFeeCredentials(x);
+        }
+
         if (!GlobalMiningPreset::I().IsInDevFeeMode())
             m_active = &m_primary;
     }
@@ -379,7 +389,6 @@ void StratumClient::WorkLoop()
                     {
                         Json::Value responseObject;
                         Json::Reader reader;
-
                         m_lastReceivedLine = response;
                         if (reader.parse(response.c_str(), responseObject))
                         {
@@ -535,7 +544,7 @@ void StratumClient::ProcessExtranonce(Json::Value& responseObject)
     RHMINER_ASSERT(params.isArray());
 
     std::string enonce = params.get((Json::Value::ArrayIndex)0, "").asString();
-    PrintOut("Extranonce set to %s\n", enonce);
+    PrintOut("Extranonce set to %s\n", enonce.c_str());
 
     for (auto i = enonce.length(); i < 16; ++i)
         enonce += "0";
@@ -785,7 +794,7 @@ void StratumClient::ProcessSetDiff(Json::Value& responseObject)
 {
     Json::Value params = responseObject.get("params", Json::Value::null);
     double stratDiff = params.isArray() ? params[0].asDouble() : responseObject.asDouble();
-    SetStratumDiff(stratDiff);
+    SetStratumDiff((float)stratDiff);
 }
 
 
@@ -842,12 +851,14 @@ void StratumClient::RespondMiningSubmit(Json::Value& responseObject, U64 gpuInde
 {
     //process mining.submit responce
     string errorStr;
+    U32 calltime = TimeGetMilliSec() - lastMethodCallTime;
+
     bool succeded = HandleMiningSubmitResponceResult(responseObject, errorStr, lastMethodCallTime);
     if (succeded)
     {
-        if (!GlobalMiningPreset::I().IsInDevFeeMode())
+        if (!GlobalMiningPreset::I().IsInDevFeeMode()) 
         {
-            PrintOutCritical("Share accepted by %s\n\n", m_active->HostDescr());
+            PrintOutCritical("Share accepted by %s in %u ms \n\n", m_active->HostDescr(),calltime);
             m_farm->AddAcceptedSolution((U32)gpuIndex);
             m_lastSubmitTime = TimeGetMilliSec();
         }
@@ -856,7 +867,7 @@ void StratumClient::RespondMiningSubmit(Json::Value& responseObject, U64 gpuInde
     {
         if (!GlobalMiningPreset::I().IsInDevFeeMode())
         {
-            PrintOutCritical("Share REJECTED by %s. Reason :%s\n\n", m_active->HostDescr(), errorStr.c_str());
+            PrintOutCritical("Share REJECTED by %s in %u ms. Reason :%s\n\n", m_active->HostDescr(), calltime, errorStr.c_str());
             m_farm->AddRejectedSolution((U32)gpuIndex);
         }
     }
@@ -994,7 +1005,7 @@ void StratumClient::ProcessMiningNotifySolo(Json::Value& jsondata)
 
         string nonce1;
         char LocalPayloadData[67] = {0};
-        strncpy(LocalPayloadData, "rhminer.rhminer.rhminer.rhminer.rhminer.rhminer.rhminer.polyminer1", sizeof(LocalPayloadData));
+        strncpy(LocalPayloadData, "rhminer.rhminer.rhminer.rhminer.rhminer.rhminer.rhminer.polyminer1", sizeof(LocalPayloadData)-1);
         if (g_extraPayload.length())
         {
             //filter
@@ -1007,6 +1018,7 @@ void StratumClient::ProcessMiningNotifySolo(Json::Value& jsondata)
             memcpy(LocalPayloadData , g_extraPayload.c_str(), RH_Min((size_t)(66 - 11), g_extraPayload.length()) ); 
             LocalPayloadData[66] = 0;
         }
+
         if (payload.length() > 52)
         {
             //NOTE: there is a bug in the wallet where it will resent the last submited payload in the next mining notify. 
@@ -1142,7 +1154,7 @@ void StratumClient::ProcessReponse(Json::Value& responseObject)
         }
         if (lastMethodName == "miner-submit")
         {
-            RespondMiningSubmitSolo(responseObject, gpuIndex);
+            RespondMiningSubmitSolo(responseObject, (U32)gpuIndex);
             return;
         }
         else if (lastMethodName == "mining.subscribe")

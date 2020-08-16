@@ -15,7 +15,7 @@
 /// @file
 /// @copyright Polyminer1, QualiaLibre
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include <random>
 #include "utils.h"
 #include <sys/stat.h>
@@ -41,12 +41,9 @@
 
 #endif //_WIN32_WINNT
 
-//#define RH_OUTPUT_TO_DEBUGGER
-
 extern int g_logVerbosity;
-
 #define STR_FORMAT_TEXT_BUFFER_COUNT    (64+8)
-#define STR_FORMAT_TEXT_BUFFER_SIZE     4096
+#define STR_FORMAT_TEXT_BUFFER_SIZE     RHMINER_KB(12)
 
 extern char const* getThreadName();
 typedef std::chrono::system_clock Clock;
@@ -470,7 +467,11 @@ void CpuYield()
 #ifdef _WIN32_WINNT
     Yield();
 #else
+    #if defined(MACOS_X) || (defined(__APPLE__) & defined(__MACH__))
+		std::this_thread::yield();
+    #else
     pthread_yield();
+    #endif
 #endif
 }
 
@@ -812,6 +813,8 @@ U64 GetFileSize(const char* name)
     return buf.st_size;
 #endif
 } 
+
+///////////////////////////
 
 
 ///////////////////////////////////////////////////////

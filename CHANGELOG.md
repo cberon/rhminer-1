@@ -1,5 +1,45 @@
 # rhminer update and bugfix history
 
+Version 2.3 - Optimizations up to 10%
+*General optimizations from 5% and up, depending on cpu and mem speed
+*Default mining cpu count is *All CPU* instead of 1
+*Remove requirement of command line options -cpu and -cputhreads
+*Network stability improved !
+
+
+Version 2.2b - Removed pascalpool.org from DevPool list
+*Improved pool connection
+*code cleanup and minor improvements (linux and macos)
+
+
+Version 2.2 - New optimizations up to 55% faster.
+*Added major optimizations. (55% on Platinuim, 50% on i7 and i5)
+*Tested on i5, i7, Epic and Xeon 
+*Added version in log and submit chrono
+
+Version 2.1c
+*Fixed miner stalling after 24+ hours
+*Fixed miner crashing when resizing terminal
+*Fixed screen -r making miner stop
+*Fixed terminal randomly closing
+*Fixed linux caching error that give out litle more than 2% more speed.
+*Validated by tclark70
+
+Version 2.1
+* Optimized RandomHash2 with up to 80% more speed. (On some system rhminer 2.1 is up to 250% faster than official miner)
+* Fixed linux binary where main thread was exiting after miner startup.
+* Linux zip files now contain rhminer as an executable and not a simple file.
+* FIxed windows packages and removed extra folders
+
+Version 2.0
+* Added RandomHash2. Up to 110% Faster than the reference miner.
+
+Version 1.5.3 - 8 Jul 2019
+* Added MacOS support and binaries. (Tested on High Sierra and El Capitan)
+* Added internal cpu throttling option to slow down mining.
+* Fixed: No more dulicate shares
+* Fixed: EthMan API : sent config.txt was ignored when restarting miner on Linux.
+
 Version 1.5.2 - 16 May 2019
 * Fixed Xml parsing of config file. Some options where skipped.
 

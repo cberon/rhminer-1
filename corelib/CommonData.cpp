@@ -22,8 +22,9 @@
  *
  * Shared algorithms and data types.
  */
+
+#include ".\rhminer\precomp.h"
 #include <cstddef> 
-#include "precomp.h"
 #include "CommonData.h"
 
 using namespace std;
@@ -69,7 +70,7 @@ int fromHex(char _i, WhenError _throw)
 
 bytes fromHex(std::string const& _s, WhenError _throw)
 {
-	unsigned s = (_s[0] == '0' && _s[1] == 'x') ? 2 : 0;
+	unsigned s = (_s[0] == '0' && (_s[1] == 'x' || _s[1] == 'X')) ? 2 : 0;
 	std::vector<uint8_t> ret;
 	ret.reserve((_s.size() - s + 1) / 2);
 

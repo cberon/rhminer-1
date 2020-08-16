@@ -36,14 +36,14 @@ protected:
     // Get all codes and kernel name
     virtual U32 GetOutputMaxCount(){ return MAX_GPUS; }
     virtual U32 GetOutputBufferSize() {return (GetOutputMaxCount() + 1)*sizeof(U32);}
-    virtual U32 GetHeaderBufferSize() { return PascalHeaderSize; }
+    virtual U32 GetHeaderBufferSize() { return PascalHeaderSizeV5 ; }
 
 
     // must use m_queue in m_context to load/store buffers
     virtual void                  QueueKernel();
     virtual PrepareWorkStatus     PrepareWork(const PascalWorkSptr& workTempl, bool reuseCurrentWP = false);
     virtual void                  EvalKernelResult();
-    virtual SolutionSptr          MakeSubmitSolution(const std::vector<U64>& nonces, bool isFromCpuMiner);
+    virtual SolutionSptr          MakeSubmitSolution(const std::vector<U64>& nonces, U64 nonce2, bool isFromCpuMiner);
     virtual void                  SetSearchKernelCurrentTarget(U32 paramIndex, cl::Kernel& searchKernel);
     virtual void                  ClearKernelOutputBuffer(); 
     virtual KernelCodeAndFuctions GetKernelsCodeAndFunctions(); 

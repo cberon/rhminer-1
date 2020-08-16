@@ -1,4 +1,4 @@
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 /*
  * A trivial little dlopen()-based wrapper library for the
  * NVIDIA NVML library, to allow runtime discovery of NVML on an

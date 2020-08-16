@@ -34,6 +34,5 @@ public:
 
 protected:
     virtual void            QueueKernel();
-    virtual SolutionSptr    MakeSubmitSolution(const std::vector<U64>& nonces, bool isFromCpuMiner);
 };
 

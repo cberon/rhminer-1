@@ -14,7 +14,7 @@
 /// @file
 /// @copyright Polyminer1
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "CLMinerBase.h"
 #include "MinersLib/Global.h"
 

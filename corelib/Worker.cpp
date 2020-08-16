@@ -22,7 +22,7 @@
  */
 
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "corelib/Worker.h"
 #include "corelib/Log.h"
 

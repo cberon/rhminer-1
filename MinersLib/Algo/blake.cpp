@@ -30,7 +30,7 @@
  * @author   Thomas Pornin <thomas.pornin@cryptolog.com>
  */
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include <stddef.h>
 #include <string.h>
 #include <limits.h>

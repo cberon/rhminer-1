@@ -1,4 +1,4 @@
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "sph_sha2.h"
 #include "MinersLib/Pascal/PascalCommon.h"
 

@@ -1,4 +1,4 @@
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 /*
 * Wrapper for AMD SysFS on linux, using adapted code from amdcovc by matszpk
 *

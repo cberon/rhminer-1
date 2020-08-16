@@ -14,7 +14,7 @@
 /// @file
 /// @copyright Polyminer1
 
-#include "precomp.h"
+#include ".\rhminer\precomp.h"
 #include "GenericMinerClient.h"
 #include "MinersLib/CLMinerBase.h"
 #include "corelib/PascalWork.h"
@@ -185,9 +185,6 @@ void GenericMinerClient::doStratum()
 
         while (m_stratumClient->isRunning())
 	    {
-            bool oncePerFRame = false;
-        
-            oncePerFRame = false;
 		    auto mp = m_farm.miningProgress( false);
 
             if (m_stratumClient->isConnected())
@@ -216,7 +213,7 @@ void GenericMinerClient::doStratum()
                     str += "(";
                     for (unsigned i = 0; i < mp.minersHasheRate.size(); i++)
                     {
-                        auto mh = pround(mp.minersHasheRate[i], 2);
+                        auto mh = pround((float)mp.minersHasheRate[i], 2);
                         str += FormatString("%s %s", GpuManager::Gpus[mp.gpuGlobalIndex[i]].gpuName.c_str(), HashrateToString(mh));
                         if (i + 1 != mp.minersHasheRate.size())
                             str += " ";
@@ -273,7 +270,7 @@ void GenericMinerClient::doStratum()
                 }
                 CpuSleep(1000);
 
-                if (GlobalMiningPreset::I().RestartRequested() == GlobalMiningPreset::eInteralRestart && m_farm.isMining())
+                if (GlobalMiningPreset::I().RestartRequested() == GlobalMiningPreset::eInteralRestart /*&& m_farm.isMining()*/)
                 {
                     PrintOutCritical("Restarging rhminer...\n");
                     //once every 1 sec
