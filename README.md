@@ -87,6 +87,8 @@ On Windows 7/8/10, if you get the missing OpenCL.dll error you need to download 
 ## Command line options
 ```
 General options:
+  -devfee		The percentage time to be used for contribution to developer's account (0-100).  
+  			Default is 0
   -maxsubmiterrors      Stop the miner when a number of consecutive submit errors occured.
                         Default is 10 consecutive errors.
                         This is usefull when mining into local wallet.
